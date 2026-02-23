@@ -29,11 +29,12 @@ class DiscoveryService:
         top_n: int = 5,
     ) -> list[SearchItem]:
         key = f"{scope_key}|{category}|{keyword.strip().lower()}"
-        cached = await self.runtime.get_search_cache(key, max_age_sec=10 * 60)
+        config = await self.runtime.get_effective_config(scope_key)
+        ttl = int(config.get("cache", {}).get("ttlDiscoverySec", 30 * 60) or 30 * 60)
+        cached = await self.runtime.get_search_cache(key, max_age_sec=max(60, ttl))
         if cached:
             return [SearchItem(**item) for item in cached[:top_n]]
 
-        config = await self.runtime.get_effective_config(scope_key)
         sources = config.get("sources", {})
         allowed_domains = [str(x) for x in sources.get("allowedDomains", [])]
         seeds = [str(x) for x in sources.get("seeds", {}).get(category, [])]

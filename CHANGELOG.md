@@ -1,0 +1,27 @@
+## 0.9.0 - Cache & Sync Strategy Refactor
+
+- Added plugin config `parser_provider_id` with `_special: select_provider` for dedicated parser model selection in AstrBot WebUI.
+- Implemented hash-gated parsed cache pipeline in sync manager:
+  - deterministic parser first
+  - LLM fallback via `context.llm_generate(chat_provider_id=..., prompt=...)`
+  - strict JSON parse + schema validation before persist
+- Added `parsed_cache` SQLite table and runtime methods:
+  - `get_parsed_cache`
+  - `upsert_parsed_cache`
+  - `prune_parsed_cache_source`
+- Added sync/cache configuration model in runtime effective config:
+  - `sync.enable.{syllabus,calendar,exam}`
+  - `sync.intervalSec.*`
+  - `cache.ttlNewsDetailSec`
+  - `cache.ttlDiscoverySec`
+  - `cache.maxSyllabusDetailRecords`
+- Sync loops now respect enable flags and per-job interval values from plugin config.
+- Improved service caching policies:
+  - `NewsService.get_news_item`: L2 TTL cache by URL
+  - `DiscoveryService.search`: TTL driven by `cache.ttlDiscoverySec`
+  - `SyllabusService.get_course_detail`: lazy L0 write-through cache with max-record pruning
+- Enhanced HTML text extraction for table-heavy pages:
+  - table/thead/tbody/tfoot newline separators
+  - td/th separators
+  - NBSP normalization
+- Logging now includes parser mode and record stats in sync parse phase.

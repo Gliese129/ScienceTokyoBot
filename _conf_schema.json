@@ -102,6 +102,62 @@
   "parser_provider_id": {
     "type": "string",
     "description": "Dedicated LLM provider id for scheduled/startup parser tasks.",
-    "default": ""
+    "default": "",
+    "_special": "select_provider"
+  },
+  "sync_enable_syllabus": {
+    "type": "bool",
+    "description": "Enable syllabus years sync job.",
+    "default": true
+  },
+  "sync_enable_calendar": {
+    "type": "bool",
+    "description": "Enable calendar html/pdf sync jobs.",
+    "default": true
+  },
+  "sync_enable_exam": {
+    "type": "bool",
+    "description": "Enable exam pdf sync job.",
+    "default": true
+  },
+  "sync_interval_syllabus_years_sec": {
+    "type": "int",
+    "description": "Syllabus years sync interval in seconds.",
+    "default": 86400
+  },
+  "sync_interval_calendar_html_sec": {
+    "type": "int",
+    "description": "Calendar html sync interval in seconds.",
+    "default": 86400
+  },
+  "sync_interval_monthly_pdf_sec": {
+    "type": "int",
+    "description": "Monthly class schedule pdf sync interval in seconds.",
+    "default": 86400
+  },
+  "sync_interval_dow_pdf_sec": {
+    "type": "int",
+    "description": "Day-of-week schedule pdf sync interval in seconds.",
+    "default": 604800
+  },
+  "sync_interval_exam_pdf_sec": {
+    "type": "int",
+    "description": "Exam pdf sync interval in seconds.",
+    "default": 86400
+  },
+  "cache_ttl_news_detail_sec": {
+    "type": "int",
+    "description": "TTL for news detail cache.",
+    "default": 86400
+  },
+  "cache_ttl_discovery_sec": {
+    "type": "int",
+    "description": "TTL for discovery query cache.",
+    "default": 1800
+  },
+  "cache_max_records_syllabus_detail": {
+    "type": "int",
+    "description": "Max cached syllabus detail records (LRU by parsed_at).",
+    "default": 2000
   }
 }

@@ -143,6 +143,13 @@ class NewsService:
         allowed_domains = [str(x) for x in config.get("sources", {}).get("allowedDomains", [])]
         if not host_allowed(url, allowed_domains):
             return {}
+        ttl = int(config.get("cache", {}).get("ttlNewsDetailSec", 24 * 60 * 60) or 24 * 60 * 60)
+        cache_key = f"news.detail::{scope_key}::{url}"
+        cached = await self.runtime.get_search_cache(cache_key, max_age_sec=max(60, ttl))
+        if cached and isinstance(cached, list):
+            first = cached[0] if cached else None
+            if isinstance(first, dict):
+                return first
         page = await self.fetcher.fetch_text(url)
         text = html_to_text(page.text)
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -155,7 +162,7 @@ class NewsService:
             if len(key_points) >= 5:
                 break
         links = [link.url for link in extract_links(page.text, url)[:12]]
-        return {
+        payload = {
             "title": title[:200],
             "date": self._extract_date(text) or "官网未标注",
             "body_summary": text_snippet(text, "deadline", window=220) or text[:260],
@@ -163,6 +170,8 @@ class NewsService:
             "links": links,
             "url": url,
         }
+        await self.runtime.put_search_cache(cache_key, [payload])
+        return payload
 
     async def list_legacy_announcements(
         self,

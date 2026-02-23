@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
+from datetime import datetime
 from urllib.parse import urlencode, urlparse
 
 from runtime.sqlite_runtime import KVRuntime
@@ -202,7 +203,22 @@ class SyllabusService:
         if not host_allowed(url, allowed_domains):
             return {}
 
+        parsed_cached = await self.runtime.get_parsed_cache("syllabus_detail", url)
         page = await self.fetcher.fetch_text(url)
+        if (
+            isinstance(parsed_cached, dict)
+            and str(parsed_cached.get("sha256") or "") == str(page.content_hash or "")
+            and isinstance(parsed_cached.get("parsed_json"), dict)
+        ):
+            normalized = {
+                str(k): str(v) if v is not None else "官网未标注"
+                for k, v in (parsed_cached.get("parsed_json") or {}).items()
+            }
+            if fields:
+                field_set = {item.strip() for item in fields if item.strip()}
+                field_set.update({"title", "code", "url"})
+                normalized = {k: v for k, v in normalized.items() if k in field_set}
+            return normalized
         text = html_to_text(page.text)
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         title = lines[0] if lines else "官网未标注"
@@ -224,6 +240,18 @@ class SyllabusService:
             "url": url,
         }
         normalized = {k: (v if v else "官网未标注") for k, v in detail.items()}
+        await self.runtime.upsert_parsed_cache(
+            source_key="syllabus_detail",
+            source_url=url,
+            sha256=str(page.content_hash or ""),
+            parsed_json=normalized,
+            parsed_at=int(datetime.utcnow().timestamp()),
+            provider_id="deterministic",
+            parse_error=None,
+            record_count=1,
+        )
+        max_records = int(config.get("cache", {}).get("maxSyllabusDetailRecords", 2000) or 2000)
+        await self.runtime.prune_parsed_cache_source("syllabus_detail", max(100, max_records))
         if fields:
             field_set = {item.strip() for item in fields if item.strip()}
             field_set.update({"title", "code", "url"})

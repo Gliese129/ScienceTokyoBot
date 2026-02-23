@@ -93,6 +93,25 @@ DEFAULT_SCOPE_CONFIG = {
         "userKeys": [],
         "roleIds": [],
     },
+    "sync": {
+        "enable": {
+            "syllabus": True,
+            "calendar": True,
+            "exam": True,
+        },
+        "intervalSec": {
+            "syllabusYears": 24 * 60 * 60,
+            "calendarHtml": 24 * 60 * 60,
+            "monthlyPdf": 24 * 60 * 60,
+            "dowPdf": 7 * 24 * 60 * 60,
+            "examPdf": 24 * 60 * 60,
+        },
+    },
+    "cache": {
+        "ttlNewsDetailSec": 24 * 60 * 60,
+        "ttlDiscoverySec": 30 * 60,
+        "maxSyllabusDetailRecords": 2000,
+    },
 }
 
 
@@ -320,6 +339,9 @@ class KVRuntime:
                     PRIMARY KEY (source_key, source_url)
                 )
                 """
+            )
+            self._conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_parsed_cache_source_time ON parsed_cache(source_key, parsed_at DESC)"
             )
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_exam_records_version_date ON exam_records(version_id, date)")
             self._conn.execute(
@@ -1337,6 +1359,27 @@ class KVRuntime:
             )
             self._conn.commit()
 
+    async def prune_parsed_cache_source(self, source_key: str, max_records: int) -> int:
+        limit = max(1, int(max_records))
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT rowid
+                FROM parsed_cache
+                WHERE source_key = ?
+                ORDER BY parsed_at DESC
+                LIMIT -1 OFFSET ?
+                """,
+                (source_key, limit),
+            )
+            rows = cur.fetchall()
+            rowids = [int(row[0]) for row in rows if row]
+            if not rowids:
+                return 0
+            self._conn.executemany("DELETE FROM parsed_cache WHERE rowid = ?", [(rowid,) for rowid in rowids])
+            self._conn.commit()
+        return len(rowids)
+
     async def set_syllabus_available_years(self, years: list[int]) -> None:
         normalized = sorted(list({int(y) for y in years if int(y) > 2000}))
         await self._kv_put_json("syllabus::available_years", normalized)
@@ -1467,6 +1510,17 @@ class KVRuntime:
         level1_min = KVRuntime._to_int(page_config.get("ban_level_1_minutes"), 10)
         level2_hour = KVRuntime._to_int(page_config.get("ban_level_2_hours"), 24)
         level3_perm = KVRuntime._to_bool(page_config.get("ban_level_3_permanent"), True)
+        sync_enable_syllabus = KVRuntime._to_bool(page_config.get("sync_enable_syllabus"), True)
+        sync_enable_calendar = KVRuntime._to_bool(page_config.get("sync_enable_calendar"), True)
+        sync_enable_exam = KVRuntime._to_bool(page_config.get("sync_enable_exam"), True)
+        sync_interval_syllabus = KVRuntime._to_int(page_config.get("sync_interval_syllabus_years_sec"), 24 * 60 * 60)
+        sync_interval_calendar_html = KVRuntime._to_int(page_config.get("sync_interval_calendar_html_sec"), 24 * 60 * 60)
+        sync_interval_monthly_pdf = KVRuntime._to_int(page_config.get("sync_interval_monthly_pdf_sec"), 24 * 60 * 60)
+        sync_interval_dow_pdf = KVRuntime._to_int(page_config.get("sync_interval_dow_pdf_sec"), 7 * 24 * 60 * 60)
+        sync_interval_exam_pdf = KVRuntime._to_int(page_config.get("sync_interval_exam_pdf_sec"), 24 * 60 * 60)
+        cache_ttl_news_detail_sec = KVRuntime._to_int(page_config.get("cache_ttl_news_detail_sec"), 24 * 60 * 60)
+        cache_ttl_discovery_sec = KVRuntime._to_int(page_config.get("cache_ttl_discovery_sec"), 30 * 60)
+        cache_max_syllabus_detail_records = KVRuntime._to_int(page_config.get("cache_max_records_syllabus_detail"), 2000)
 
         return {
             "enabledFeatures": enabled_features or deepcopy(DEFAULT_SCOPE_CONFIG["enabledFeatures"]),
@@ -1505,6 +1559,25 @@ class KVRuntime:
             "admins": {
                 "userKeys": admin_user_keys,
                 "roleIds": admin_role_ids,
+            },
+            "sync": {
+                "enable": {
+                    "syllabus": sync_enable_syllabus,
+                    "calendar": sync_enable_calendar,
+                    "exam": sync_enable_exam,
+                },
+                "intervalSec": {
+                    "syllabusYears": max(60, sync_interval_syllabus),
+                    "calendarHtml": max(60, sync_interval_calendar_html),
+                    "monthlyPdf": max(60, sync_interval_monthly_pdf),
+                    "dowPdf": max(60, sync_interval_dow_pdf),
+                    "examPdf": max(60, sync_interval_exam_pdf),
+                },
+            },
+            "cache": {
+                "ttlNewsDetailSec": max(60, cache_ttl_news_detail_sec),
+                "ttlDiscoverySec": max(60, cache_ttl_discovery_sec),
+                "maxSyllabusDetailRecords": max(100, cache_max_syllabus_detail_records),
             },
         }
 

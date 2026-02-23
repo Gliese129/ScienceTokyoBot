@@ -63,13 +63,54 @@ class SyncManager:
         if self._started:
             return
         self._started = True
-        loops = [
-            ("sync_syllabus_years", 24 * 60 * 60, self._job_syllabus_years),
-            ("sync_calendar_html", 24 * 60 * 60, self._job_calendar_html),
-            ("sync_monthly_class_pdf", 24 * 60 * 60, self._job_monthly_class_pdf),
-            ("sync_dow_class_pdf", 7 * 24 * 60 * 60, self._job_dow_class_pdf),
-            ("sync_exam_pdf", 24 * 60 * 60, self._job_exam_pdf),
-        ]
+        sync_cfg = self.runtime.base_config.get("sync", {}) if isinstance(self.runtime.base_config, dict) else {}
+        enable_cfg = sync_cfg.get("enable", {}) if isinstance(sync_cfg, dict) else {}
+        interval_cfg = sync_cfg.get("intervalSec", {}) if isinstance(sync_cfg, dict) else {}
+        enable_syllabus = bool(enable_cfg.get("syllabus", True))
+        enable_calendar = bool(enable_cfg.get("calendar", True))
+        enable_exam = bool(enable_cfg.get("exam", True))
+        loops: list[tuple[str, int, Callable[[], Awaitable[dict[str, Any]]]]] = []
+        if enable_syllabus:
+            loops.append(
+                (
+                    "sync_syllabus_years",
+                    max(60, int(interval_cfg.get("syllabusYears", 24 * 60 * 60))),
+                    self._job_syllabus_years,
+                )
+            )
+        if enable_calendar:
+            loops.append(
+                (
+                    "sync_calendar_html",
+                    max(60, int(interval_cfg.get("calendarHtml", 24 * 60 * 60))),
+                    self._job_calendar_html,
+                )
+            )
+            loops.append(
+                (
+                    "sync_monthly_class_pdf",
+                    max(60, int(interval_cfg.get("monthlyPdf", 24 * 60 * 60))),
+                    self._job_monthly_class_pdf,
+                )
+            )
+            loops.append(
+                (
+                    "sync_dow_class_pdf",
+                    max(60, int(interval_cfg.get("dowPdf", 7 * 24 * 60 * 60))),
+                    self._job_dow_class_pdf,
+                )
+            )
+        if enable_exam:
+            loops.append(
+                (
+                    "sync_exam_pdf",
+                    max(60, int(interval_cfg.get("examPdf", 24 * 60 * 60))),
+                    self._job_exam_pdf,
+                )
+            )
+        if not loops:
+            self.logger.warning("SyncManager start skipped: all sync jobs are disabled by config.")
+            return
         for name, interval_sec, runner in loops:
             task = asyncio.create_task(self._run_periodic(name, interval_sec, runner))
             self._tasks.append(task)

@@ -73,6 +73,14 @@ python -m pytest -q
 - To debug source issues quickly, run `/isct_admin_source_debug <category>` and check the resolved `allowed_domains`, `seeds`, and `fallbacks`.
 - For scheduled parser jobs, set `parser_provider_id` in plugin config to a lightweight model provider id (empty means deterministic-only parsing).
 
+## Cache & Sync Strategy
+
+- L0 parsed cache (`parsed_cache` in SQLite): hash-gated structured parsing for low-frequency sources.
+- L1 index cache: list-like structures (news list / seed links) via SQLite lightweight rows.
+- L2 query cache (`search_cache` with TTL): discovery/search/detail short-term acceleration.
+- Sync jobs only call LLM fallback parser via `context.llm_generate(chat_provider_id=..., prompt=...)`.
+- Runtime query tools should prefer SQLite results and avoid LLM for deterministic answers.
+
 ## Build Zip For AstrBot
 
 ```bash
