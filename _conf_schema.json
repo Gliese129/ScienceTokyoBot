@@ -98,5 +98,10 @@
     "type": "string",
     "description": "Comma-separated role ids treated as admin.",
     "default": ""
+  },
+  "parser_provider_id": {
+    "type": "string",
+    "description": "Dedicated LLM provider id for scheduled/startup parser tasks.",
+    "default": ""
   }
 }

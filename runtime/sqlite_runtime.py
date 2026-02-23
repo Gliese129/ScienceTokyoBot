@@ -306,6 +306,21 @@ class KVRuntime:
                 )
                 """
             )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS parsed_cache (
+                    source_key TEXT NOT NULL,
+                    source_url TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    parsed_json TEXT NOT NULL,
+                    parsed_at INTEGER NOT NULL,
+                    provider_id TEXT,
+                    parse_error TEXT,
+                    record_count INTEGER NOT NULL,
+                    PRIMARY KEY (source_key, source_url)
+                )
+                """
+            )
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_exam_records_version_date ON exam_records(version_id, date)")
             self._conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_exam_records_version_course ON exam_records(version_id, course_code)"
@@ -1255,6 +1270,72 @@ class KVRuntime:
             "last_record_count": int(row[6] or 0) if row[6] is not None else None,
             "changed": None if row[7] is None else bool(row[7]),
         }
+
+    async def get_parsed_cache(self, source_key: str, source_url: str) -> dict[str, Any] | None:
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT sha256, parsed_json, parsed_at, provider_id, parse_error, record_count
+                FROM parsed_cache
+                WHERE source_key = ? AND source_url = ?
+                """,
+                (source_key, source_url),
+            )
+            row = cur.fetchone()
+        if not row:
+            return None
+        try:
+            parsed_json = json.loads(row[1] or "null")
+        except Exception:
+            parsed_json = None
+        return {
+            "sha256": str(row[0] or ""),
+            "parsed_json": parsed_json,
+            "parsed_at": int(row[2] or 0),
+            "provider_id": row[3],
+            "parse_error": row[4],
+            "record_count": int(row[5] or 0),
+        }
+
+    async def upsert_parsed_cache(
+        self,
+        *,
+        source_key: str,
+        source_url: str,
+        sha256: str,
+        parsed_json: Any,
+        parsed_at: int,
+        provider_id: str | None,
+        parse_error: str | None,
+        record_count: int,
+    ) -> None:
+        payload = json.dumps(parsed_json, ensure_ascii=False, default=self._json_default)
+        with self._lock:
+            self._conn.execute(
+                """
+                INSERT INTO parsed_cache (
+                    source_key, source_url, sha256, parsed_json, parsed_at, provider_id, parse_error, record_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(source_key, source_url) DO UPDATE SET
+                    sha256 = excluded.sha256,
+                    parsed_json = excluded.parsed_json,
+                    parsed_at = excluded.parsed_at,
+                    provider_id = excluded.provider_id,
+                    parse_error = excluded.parse_error,
+                    record_count = excluded.record_count
+                """,
+                (
+                    source_key,
+                    source_url,
+                    sha256,
+                    payload,
+                    int(parsed_at),
+                    provider_id,
+                    parse_error,
+                    int(record_count),
+                ),
+            )
+            self._conn.commit()
 
     async def set_syllabus_available_years(self, years: list[int]) -> None:
         normalized = sorted(list({int(y) for y in years if int(y) > 2000}))

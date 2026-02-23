@@ -151,6 +151,7 @@ class ScienceTokyoNerdBotPlugin(Star):
         self.campus_service = CampusInfoService(self.runtime)
         self.global_config = load_global_config(Path(__file__).parent / "config" / "plugin_global.json")
         self.runtime.set_fallback_sources(self.global_config.raw.get("fallbackSources", {}))
+        self.parser_provider_id = str(self.page_config.get("parser_provider_id", "")).strip()
         self.query_ops = QueryOps(
             exam_service=self.exam_service,
             syllabus_service=self.syllabus_service,
@@ -166,13 +167,16 @@ class ScienceTokyoNerdBotPlugin(Star):
             exam_service=self.exam_service,
             syllabus_service=self.syllabus_service,
             logger=astr_logger,
+            context=self.context,
+            parser_provider_id=self.parser_provider_id,
         )
         self.sync_manager.ensure_started()
         astr_logger.info(
-            "ScienceTokyo Plugin initialized with SQLite runtime, db=%s, config_keys=%s, source_debug=%s",
+            "ScienceTokyo Plugin initialized with SQLite runtime, db=%s, config_keys=%s, source_debug=%s, parser_provider_id=%s",
             str(self.plugin_data_dir / "runtime.sqlite3"),
             sorted(list(self.page_config.keys())),
             self.global_config.source_debug_enabled,
+            self.parser_provider_id or "<empty>",
         )
 
     async def nerd_ping(self, event: AstrMessageEvent):

@@ -10,6 +10,7 @@ This repository now follows AstrBot-first layout:
 - global defaults are stored in `config/plugin_global.json` (tool limits / fallback sources / source debug switch)
 - no-LLM periodic sync jobs run in background (`isct_core/sync_manager.py`) for syllabus years, calendar html/pdf and exam pdf indexing
 - page config from AstrBot WebUI is loaded via `__init__(context, config)` and used as default baseline
+- parser tasks can use dedicated `parser_provider_id` (WebUI plugin config) via `context.llm_generate(chat_provider_id=..., prompt=...)`
 - runtime state for config/prefs/ban score uses SQLite (`data/plugin_data/{plugin_name}/runtime.sqlite3`)
 - push target uses `event.unified_msg_origin` and active delivery uses `self.context.send_message(unified_msg_origin, ...)`
 - plugin data directory is resolved by `get_astrbot_data_path() / "plugin_data" / self.name`
@@ -70,6 +71,7 @@ python -m pytest -q
 - In AstrBot, make sure tool calling is enabled for the chat provider and these tools are turned on (e.g. `/tool ls`, `/tool on <tool_name>`).
 - `llm_tool` descriptions come from the function docstring and `Args` section, so do not remove them.
 - To debug source issues quickly, run `/isct_admin_source_debug <category>` and check the resolved `allowed_domains`, `seeds`, and `fallbacks`.
+- For scheduled parser jobs, set `parser_provider_id` in plugin config to a lightweight model provider id (empty means deterministic-only parsing).
 
 ## Build Zip For AstrBot
 

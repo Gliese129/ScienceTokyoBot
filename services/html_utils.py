@@ -60,16 +60,20 @@ class _TextParser(HTMLParser):
         if lowered in {"script", "style"}:
             self._skip_depth += 1
             return
-        if lowered in {"br", "p", "div", "li", "tr", "h1", "h2", "h3", "h4"}:
+        if lowered in {"br", "p", "div", "li", "tr", "h1", "h2", "h3", "h4", "table", "thead", "tbody", "tfoot"}:
             self.parts.append("\n")
+        if lowered in {"td", "th"}:
+            self.parts.append("\t")
 
     def handle_endtag(self, tag: str):
         lowered = tag.lower()
         if lowered in {"script", "style"} and self._skip_depth > 0:
             self._skip_depth -= 1
             return
-        if lowered in {"p", "div", "li", "tr"}:
+        if lowered in {"p", "div", "li", "tr", "table", "thead", "tbody", "tfoot"}:
             self.parts.append("\n")
+        if lowered in {"td", "th"}:
+            self.parts.append("\t")
 
     def handle_data(self, data: str):
         if self._skip_depth > 0:
@@ -98,7 +102,7 @@ def html_to_text(html_text: str) -> str:
     parser = _TextParser()
     parser.feed(html_text or "")
     parser.close()
-    text = "".join(parser.parts)
+    text = "".join(parser.parts).replace("\xa0", " ")
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r"[ \t]+", " ", text)
     return text.strip()
