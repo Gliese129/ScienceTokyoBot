@@ -6,8 +6,9 @@ import io
 import json
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Awaitable, Callable
+from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from isct_core.config_loader import GlobalConfig
@@ -557,17 +558,14 @@ class SyncManager:
             ]
 
         total_records = 0
-        total_indexes = 0
         changed_any = False
         last_url = root_url
         last_sha = root_page.content_hash
-        touched_years: list[int] = []
 
         for url in year_urls[:3]:
             year = self._extract_year_from_calendar_url(url)
             if year <= 0:
                 continue
-            touched_years.append(year)
             is_allowed = host_allowed(url, allowed)
             self.logger.info("SOURCE url=%s allowed=%s reason=%s", url, str(is_allowed).lower(), "" if is_allowed else "domain_not_allowed")
             if not is_allowed:
@@ -608,8 +606,18 @@ class SyncManager:
                 records_count,
                 parse_error,
             )
-            upsert_records = await self.runtime.replace_calendar_events(year, events) if bool(parse.get("changed")) else 0
-            upsert_indexes = await self.runtime.replace_term_ranges(year, term_ranges) if bool(parse.get("changed")) else 0
+            merged_events = self._map_calendar_payload_to_events(events=events, term_ranges=term_ranges)
+            upsert_records = (
+                await self.runtime.replace_calendar_events_for_source(
+                    source_key=self._calendar_source_key(url),
+                    source_url=url,
+                    source_year=year,
+                    content_hash=page.content_hash,
+                    events=merged_events,
+                )
+                if bool(parse.get("changed"))
+                else 0
+            )
             await self.runtime.upsert_source_state(
                 source_url=url,
                 etag=page.etag,
@@ -620,31 +628,12 @@ class SyncManager:
                 extra={"year": year, "kind": "calendar_html"},
             )
             total_records += upsert_records
-            total_indexes += upsert_indexes
             last_url = url
             last_sha = page.content_hash
-
-        index_map: dict[str, list[str]] = {}
-        for year in touched_years:
-            for event in await self.runtime.list_calendar_events(year):
-                if not event.get("is_no_class"):
-                    continue
-                try:
-                    start = datetime.strptime(str(event.get("start_date")), "%Y-%m-%d").date()
-                    end = datetime.strptime(str(event.get("end_date")), "%Y-%m-%d").date()
-                except Exception:
-                    continue
-                cursor = start
-                while cursor <= end:
-                    key = cursor.strftime("%Y-%m-%d")
-                    index_map.setdefault(key, []).append(str(event.get("event_id")))
-                    cursor = cursor + timedelta(days=1)
-        idx_count = await self.runtime.replace_calendar_no_class_index(index_map)
-        total_indexes += idx_count
         self.logger.info(
             "DB name=calendar_html upsert_versions=0 upsert_records=%s upsert_indexes=%s",
             total_records,
-            total_indexes,
+            0,
         )
         return {
             "last_source_url": last_url,
@@ -855,6 +844,57 @@ class SyncManager:
             return int(m.group(1))
         except Exception:
             return 0
+
+    @staticmethod
+    def _calendar_source_key(url: str) -> str:
+        try:
+            parts = urlsplit(str(url))
+            canonical = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ""))
+        except Exception:
+            canonical = str(url)
+        return f"calendar::{canonical}"
+
+    @staticmethod
+    def _map_calendar_payload_to_events(
+        *,
+        events: list[dict[str, Any]],
+        term_ranges: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for item in events:
+            title = str(item.get("title") or "").strip()
+            start_date = str(item.get("start_date") or "").strip()
+            end_date = str(item.get("end_date") or start_date).strip()
+            if not title or not start_date or not end_date:
+                continue
+            out.append(
+                {
+                    "title": title[:200],
+                    "kind": str(item.get("kind") or "misc").strip() or "misc",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "is_no_class": bool(item.get("is_no_class")),
+                    "meta": {},
+                }
+            )
+        for item in term_ranges:
+            term = str(item.get("term") or "").strip() or "官网未标注"
+            start_date = str(item.get("start_date") or "").strip()
+            end_date = str(item.get("end_date") or start_date).strip()
+            if not start_date or not end_date:
+                continue
+            title = str(item.get("title") or f"{term} Classes").strip() or f"{term} Classes"
+            out.append(
+                {
+                    "title": title[:200],
+                    "kind": "class_range",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "is_no_class": False,
+                    "meta": {"term": term},
+                }
+            )
+        return out
 
     def _parse_monthly_meta(self, text: str, pdf_url: str) -> dict[str, Any]:
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]

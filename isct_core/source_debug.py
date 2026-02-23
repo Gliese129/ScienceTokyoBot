@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from urllib.parse import urlsplit, urlunsplit
+
 from typing import Any
 
 from isct_core.config_loader import GlobalConfig
@@ -14,16 +16,42 @@ async def build_source_debug(
     category: str,
     sources: list[str] | None,
 ) -> tuple[list[str], str]:
+    def _dedupe(rows: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            raw = str(row or "").strip()
+            if not raw:
+                continue
+            note = ""
+            url = raw
+            if " (" in raw and raw.endswith(")"):
+                idx = raw.rfind(" (")
+                if idx > 0:
+                    url = raw[:idx].strip()
+                    note = raw[idx:].strip()
+            try:
+                parts = urlsplit(url)
+                canonical = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path, parts.query, ""))
+            except Exception:
+                canonical = url
+            key = f"{canonical}{note}"
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(f"{canonical}{note}" if note else canonical)
+        return out
+
     effective = await runtime.get_effective_config(scope_key)
     source_cfg = effective.get("sources", {})
     allowed_domains = [str(x) for x in source_cfg.get("allowedDomains", [])]
     seeds = [str(x) for x in source_cfg.get("seeds", {}).get(category, [])]
 
-    resolved = [str(x) for x in (sources or []) if str(x).strip()]
+    resolved = _dedupe([str(x) for x in (sources or []) if str(x).strip()])
     if not resolved:
-        resolved = [f"{seed} (seed)" for seed in seeds[:5]]
+        resolved = _dedupe([f"{seed} (seed)" for seed in seeds[:5]])
     if not resolved:
-        resolved = [f"{url} (fallback)" for url in global_config.fallback_sources(category)]
+        resolved = _dedupe([f"{url} (fallback)" for url in global_config.fallback_sources(category)])
 
     debug = (
         f"source_debug: category={category}, "

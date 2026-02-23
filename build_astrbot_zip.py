@@ -12,15 +12,18 @@ SAFE_UPLOAD_BASENAME = "astrbot_plugin_isct_bot"  # only letters/digits/undersco
 
 INCLUDE_PATHS = [
     "main.py",
+    "plugin",
     "guards",
     "adapters",
     "runtime",
     "services",
     "isct_core",
     "config",
+    "docs",
     "metadata.yaml",
     "_conf_schema.json",
     "README.md",
+    "CHANGELOG.md",
 ]
 
 EXCLUDE_DIR_NAMES = {"__pycache__", ".pytest_cache", ".git", "tests", "dist", "data"}

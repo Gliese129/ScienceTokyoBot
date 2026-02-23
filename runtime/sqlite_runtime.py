@@ -255,41 +255,7 @@ class KVRuntime:
                 )
                 """
             )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS calendar_events (
-                    year INTEGER NOT NULL,
-                    event_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    start_date TEXT NOT NULL,
-                    end_date TEXT NOT NULL,
-                    kind TEXT,
-                    is_no_class INTEGER NOT NULL,
-                    source_url TEXT,
-                    PRIMARY KEY (year, event_id)
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS calendar_no_class_index (
-                    date TEXT PRIMARY KEY,
-                    event_ids_json TEXT NOT NULL
-                )
-                """
-            )
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS term_ranges (
-                    year INTEGER NOT NULL,
-                    term TEXT NOT NULL,
-                    start_date TEXT,
-                    end_date TEXT,
-                    source_url TEXT,
-                    PRIMARY KEY (year, term)
-                )
-                """
-            )
+            self._ensure_calendar_events_schema_locked()
             self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS dow_schedule_rows (
@@ -348,6 +314,71 @@ class KVRuntime:
                 "CREATE INDEX IF NOT EXISTS idx_exam_records_version_course ON exam_records(version_id, course_code)"
             )
             self._conn.commit()
+
+    def _ensure_calendar_events_schema_locked(self) -> None:
+        expected_columns = {
+            "id",
+            "source_key",
+            "source_url",
+            "source_year",
+            "content_hash",
+            "title",
+            "kind",
+            "start_date",
+            "end_date",
+            "is_no_class",
+            "meta_json",
+            "updated_at",
+        }
+        existing_columns: set[str] = set()
+        try:
+            cur = self._conn.execute("PRAGMA table_info(calendar_events)")
+            rows = cur.fetchall()
+            for row in rows:
+                existing_columns.add(str(row[1]))
+        except Exception:
+            existing_columns = set()
+        if existing_columns and existing_columns != expected_columns:
+            # Test phase: reset incompatible legacy schema to avoid carrying migration baggage.
+            self._conn.execute("DROP TABLE IF EXISTS calendar_events")
+            self._conn.execute("DROP TABLE IF EXISTS calendar_no_class_index")
+            self._conn.execute("DROP TABLE IF EXISTS term_ranges")
+        self._conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS calendar_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                source_key TEXT NOT NULL,
+                source_url TEXT NOT NULL,
+                source_year INTEGER,
+                content_hash TEXT,
+                title TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                is_no_class INTEGER NOT NULL,
+                meta_json TEXT,
+                updated_at INTEGER NOT NULL
+            )
+            """
+        )
+        self._conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_events_dedupe
+            ON calendar_events(source_key, title, start_date, end_date, kind)
+            """
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_calendar_events_start_date ON calendar_events(start_date)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_calendar_events_end_date ON calendar_events(end_date)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_calendar_events_is_no_class ON calendar_events(is_no_class)"
+        )
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_calendar_events_source_key ON calendar_events(source_key)"
+        )
 
     def apply_page_config(self, page_config: Mapping[str, Any] | None) -> None:
         overlay = self._page_config_overlay(page_config or {})
@@ -1005,149 +1036,177 @@ class KVRuntime:
             )
             self._conn.commit()
 
-    async def replace_calendar_events(self, year: int, events: list[dict[str, Any]]) -> int:
-        year_int = int(year)
+    async def replace_calendar_events_for_source(
+        self,
+        *,
+        source_key: str,
+        source_url: str,
+        source_year: int | None,
+        content_hash: str,
+        events: list[dict[str, Any]],
+    ) -> int:
+        key = str(source_key or "").strip()
+        if not key:
+            return 0
+        now_ts = _now_ts()
         with self._lock:
-            self._conn.execute("DELETE FROM calendar_events WHERE year = ?", (year_int,))
+            self._conn.execute("DELETE FROM calendar_events WHERE source_key = ?", (key,))
             count = 0
-            for idx, event in enumerate(events):
-                event_id = str(event.get("event_id") or f"{year_int}_{idx}")
+            for raw in events:
+                title = str(raw.get("title") or "").strip()[:200]
+                start_date = str(raw.get("start_date") or "").strip()
+                end_date = str(raw.get("end_date") or start_date).strip()
+                if not title or not start_date or not end_date:
+                    continue
+                kind = str(raw.get("kind") or "misc").strip() or "misc"
+                is_no_class = 1 if bool(raw.get("is_no_class")) else 0
+                meta_value = raw.get("meta")
+                if not isinstance(meta_value, dict):
+                    meta_value = {}
                 self._conn.execute(
                     """
-                    INSERT INTO calendar_events (year, event_id, title, start_date, end_date, kind, is_no_class, source_url)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO calendar_events (
+                        source_key, source_url, source_year, content_hash,
+                        title, kind, start_date, end_date, is_no_class, meta_json, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source_key, title, start_date, end_date, kind) DO UPDATE SET
+                        source_url = excluded.source_url,
+                        source_year = excluded.source_year,
+                        content_hash = excluded.content_hash,
+                        is_no_class = excluded.is_no_class,
+                        meta_json = excluded.meta_json,
+                        updated_at = excluded.updated_at
                     """,
                     (
-                        year_int,
-                        event_id,
-                        str(event.get("title") or ""),
-                        str(event.get("start_date") or ""),
-                        str(event.get("end_date") or ""),
-                        str(event.get("kind") or ""),
-                        1 if bool(event.get("is_no_class")) else 0,
-                        str(event.get("source_url") or ""),
+                        key,
+                        str(source_url or ""),
+                        int(source_year) if source_year is not None else None,
+                        str(content_hash or ""),
+                        title,
+                        kind,
+                        start_date,
+                        end_date,
+                        is_no_class,
+                        json.dumps(meta_value, ensure_ascii=False),
+                        now_ts,
                     ),
                 )
                 count += 1
             self._conn.commit()
         return count
 
-    async def list_calendar_events(self, year: int) -> list[dict[str, Any]]:
-        year_int = int(year)
+    async def list_calendar_events_in_range(self, start_date: str, end_date: str) -> list[dict[str, Any]]:
         with self._lock:
             cur = self._conn.execute(
                 """
-                SELECT event_id, title, start_date, end_date, kind, is_no_class, source_url
+                SELECT id, source_key, source_url, source_year, content_hash, title, kind,
+                       start_date, end_date, is_no_class, meta_json, updated_at
                 FROM calendar_events
-                WHERE year = ?
-                ORDER BY start_date, title
+                WHERE start_date <= ? AND end_date >= ?
+                ORDER BY start_date, end_date, title
                 """,
-                (year_int,),
+                (str(end_date), str(start_date)),
             )
             rows = cur.fetchall()
-        return [
-            {
-                "event_id": row[0],
-                "title": row[1],
-                "start_date": row[2],
-                "end_date": row[3],
-                "kind": row[4],
-                "is_no_class": bool(row[5]),
-                "source_url": row[6],
-            }
-            for row in rows
-        ]
+        return [self._calendar_event_row_to_dict(row) for row in rows]
 
-    async def replace_calendar_no_class_index(self, mapping: dict[str, list[str]]) -> int:
-        with self._lock:
-            self._conn.execute("DELETE FROM calendar_no_class_index")
-            count = 0
-            for date_key, event_ids in mapping.items():
-                self._conn.execute(
-                    """
-                    INSERT INTO calendar_no_class_index (date, event_ids_json)
-                    VALUES (?, ?)
-                    """,
-                    (str(date_key), json.dumps(event_ids, ensure_ascii=False)),
-                )
-                count += 1
-            self._conn.commit()
-        return count
-
-    async def get_no_class_event_ids_by_date(self, date_key: str) -> list[str]:
+    async def list_calendar_events_for_source(self, source_key: str) -> list[dict[str, Any]]:
         with self._lock:
             cur = self._conn.execute(
-                "SELECT event_ids_json FROM calendar_no_class_index WHERE date = ?",
-                (date_key,),
+                """
+                SELECT id, source_key, source_url, source_year, content_hash, title, kind,
+                       start_date, end_date, is_no_class, meta_json, updated_at
+                FROM calendar_events
+                WHERE source_key = ?
+                ORDER BY start_date, end_date, title
+                """,
+                (str(source_key),),
+            )
+            rows = cur.fetchall()
+        return [self._calendar_event_row_to_dict(row) for row in rows]
+
+    async def list_calendar_no_class_on_date(self, date_key: str) -> list[dict[str, Any]]:
+        target = str(date_key)
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT id, source_key, source_url, source_year, content_hash, title, kind,
+                       start_date, end_date, is_no_class, meta_json, updated_at
+                FROM calendar_events
+                WHERE is_no_class = 1 AND start_date <= ? AND end_date >= ?
+                ORDER BY start_date, title
+                """,
+                (target, target),
+            )
+            rows = cur.fetchall()
+        return [self._calendar_event_row_to_dict(row) for row in rows]
+
+    async def has_calendar_no_class_on_date(self, date_key: str) -> bool:
+        target = str(date_key)
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                SELECT 1 FROM calendar_events
+                WHERE is_no_class = 1 AND start_date <= ? AND end_date >= ?
+                LIMIT 1
+                """,
+                (target, target),
+            )
+            row = cur.fetchone()
+        return row is not None
+
+    async def get_next_calendar_event(
+        self,
+        from_date: str,
+        *,
+        include_class_range: bool = False,
+    ) -> dict[str, Any] | None:
+        clauses = ["start_date >= ?"]
+        params: list[Any] = [str(from_date)]
+        if not include_class_range:
+            clauses.append("kind <> ?")
+            params.append("class_range")
+        where_sql = " AND ".join(clauses)
+        with self._lock:
+            cur = self._conn.execute(
+                f"""
+                SELECT id, source_key, source_url, source_year, content_hash, title, kind,
+                       start_date, end_date, is_no_class, meta_json, updated_at
+                FROM calendar_events
+                WHERE {where_sql}
+                ORDER BY start_date, end_date, title
+                LIMIT 1
+                """,
+                tuple(params),
             )
             row = cur.fetchone()
         if not row:
-            return []
+            return None
+        return self._calendar_event_row_to_dict(row)
+
+    @staticmethod
+    def _calendar_event_row_to_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         try:
-            payload = json.loads(row[0] or "[]")
+            meta = json.loads(row[10] or "{}")
+            if not isinstance(meta, dict):
+                meta = {}
         except Exception:
-            payload = []
-        if not isinstance(payload, list):
-            return []
-        return [str(x) for x in payload]
-
-    async def get_calendar_event_titles_by_ids(self, event_ids: list[str]) -> list[str]:
-        if not event_ids:
-            return []
-        placeholders = ",".join(["?"] * len(event_ids))
-        with self._lock:
-            cur = self._conn.execute(
-                f"SELECT title FROM calendar_events WHERE event_id IN ({placeholders})",
-                tuple(event_ids),
-            )
-            rows = cur.fetchall()
-        return [str(row[0]) for row in rows if row and row[0]]
-
-    async def replace_term_ranges(self, year: int, rows: list[dict[str, Any]]) -> int:
-        year_int = int(year)
-        with self._lock:
-            self._conn.execute("DELETE FROM term_ranges WHERE year = ?", (year_int,))
-            count = 0
-            for row in rows:
-                self._conn.execute(
-                    """
-                    INSERT INTO term_ranges (year, term, start_date, end_date, source_url)
-                    VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (
-                        year_int,
-                        str(row.get("term") or ""),
-                        str(row.get("start_date") or ""),
-                        str(row.get("end_date") or ""),
-                        str(row.get("source_url") or ""),
-                    ),
-                )
-                count += 1
-            self._conn.commit()
-        return count
-
-    async def list_term_ranges(self, year: int) -> list[dict[str, Any]]:
-        year_int = int(year)
-        with self._lock:
-            cur = self._conn.execute(
-                """
-                SELECT term, start_date, end_date, source_url
-                FROM term_ranges
-                WHERE year = ?
-                ORDER BY term
-                """,
-                (year_int,),
-            )
-            rows = cur.fetchall()
-        return [
-            {
-                "term": row[0],
-                "start_date": row[1],
-                "end_date": row[2],
-                "source_url": row[3],
-            }
-            for row in rows
-        ]
+            meta = {}
+        return {
+            "id": int(row[0]),
+            "source_key": str(row[1] or ""),
+            "source_url": str(row[2] or ""),
+            "source_year": int(row[3]) if row[3] is not None else None,
+            "content_hash": str(row[4] or ""),
+            "title": str(row[5] or ""),
+            "kind": str(row[6] or ""),
+            "start_date": str(row[7] or ""),
+            "end_date": str(row[8] or ""),
+            "is_no_class": bool(row[9]),
+            "meta": meta,
+            "updated_at": int(row[11] or 0),
+        }
 
     async def replace_dow_schedule_rows(self, source_url: str, rows: list[dict[str, Any]]) -> int:
         src = str(source_url)

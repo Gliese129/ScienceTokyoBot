@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from urllib.parse import urljoin
 
@@ -42,39 +42,86 @@ class CalendarService:
         self.fetcher = Fetcher(runtime)
 
     async def get_academic_schedule(self, scope_key: str, *, year: int | None = None) -> dict:
-        target_year = int(year or datetime.utcnow().year)
-        indexed_events = await self.runtime.list_calendar_events(target_year)
-        if indexed_events:
-            term_ranges = await self.runtime.list_term_ranges(target_year)
-            return {"year": target_year, "events": indexed_events, "term_ranges": term_ranges, "source": "indexed"}
-        cache_key = f"calendar.schedule::{scope_key}::{target_year}"
-        cached = await self.runtime.get_search_cache(cache_key, max_age_sec=6 * 60 * 60)
-        if cached:
-            return {"year": target_year, "events": cached, "source": "cache"}
-
-        config = await self.runtime.get_effective_config(scope_key)
-        sources = config.get("sources", {})
-        allowed_domains = [str(x) for x in sources.get("allowedDomains", [])]
-        seeds = [str(x) for x in sources.get("seeds", {}).get("calendar", [])]
-
-        events: list[CalendarEvent] = []
-        for seed in seeds[:6]:
-            if not host_allowed(seed, allowed_domains):
+        _ = scope_key
+        target_year = int(year or self.default_academic_year())
+        ay_start, ay_end = self.academic_year_bounds(target_year)
+        rows = await self.runtime.list_calendar_events_in_range(
+            ay_start.strftime("%Y-%m-%d"),
+            ay_end.strftime("%Y-%m-%d"),
+        )
+        events: list[dict] = []
+        term_ranges: list[dict] = []
+        for item in rows:
+            kind = str(item.get("kind") or "")
+            if kind == "class_range":
+                meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+                term_ranges.append(
+                    {
+                        "term": str(meta.get("term") or "").strip() or "官网未标注",
+                        "title": str(item.get("title") or ""),
+                        "start_date": str(item.get("start_date") or ""),
+                        "end_date": str(item.get("end_date") or ""),
+                        "source_url": str(item.get("source_url") or ""),
+                    }
+                )
                 continue
-            try:
-                page = await self.fetcher.fetch_text(seed)
-            except Exception:
-                continue
-            events.extend(self.parse_calendar_html(page.text, seed, target_year))
+            events.append(
+                {
+                    "title": str(item.get("title") or ""),
+                    "start_date": str(item.get("start_date") or ""),
+                    "end_date": str(item.get("end_date") or ""),
+                    "kind": kind or "misc",
+                    "is_no_class": bool(item.get("is_no_class")),
+                    "source_url": str(item.get("source_url") or ""),
+                    "meta": item.get("meta") if isinstance(item.get("meta"), dict) else {},
+                }
+            )
+        events.sort(key=lambda x: (x.get("start_date", ""), x.get("end_date", ""), x.get("title", "")))
+        term_ranges.sort(key=lambda x: (x.get("start_date", ""), x.get("term", "")))
+        return {"year": target_year, "events": events, "term_ranges": term_ranges, "source": "indexed"}
 
-        # De-dup
-        unique: dict[tuple[str, str, str], CalendarEvent] = {}
-        for event in events:
-            unique[(event.title, event.start_date, event.end_date)] = event
-        normalized = [asdict(item) for item in unique.values()]
-        normalized.sort(key=lambda x: (x.get("start_date", ""), x.get("title", "")))
-        await self.runtime.put_search_cache(cache_key, normalized)
-        return {"year": target_year, "events": normalized, "source": "live"}
+    async def list_events_overlap(self, scope_key: str, *, start_date: date, end_date: date) -> list[dict[str, str | bool]]:
+        _ = scope_key
+        rows = await self.runtime.list_calendar_events_in_range(
+            start_date.strftime("%Y-%m-%d"),
+            end_date.strftime("%Y-%m-%d"),
+        )
+        out: list[dict[str, str | bool]] = []
+        for item in rows:
+            out.append(
+                {
+                    "title": str(item.get("title") or ""),
+                    "start_date": str(item.get("start_date") or ""),
+                    "end_date": str(item.get("end_date") or ""),
+                    "kind": str(item.get("kind") or "misc"),
+                    "is_no_class": bool(item.get("is_no_class")),
+                    "source_url": str(item.get("source_url") or ""),
+                }
+            )
+        return out
+
+    async def find_next_event(
+        self,
+        scope_key: str,
+        *,
+        from_date: date,
+        include_class_range: bool = False,
+    ) -> dict[str, str | bool] | None:
+        _ = scope_key
+        item = await self.runtime.get_next_calendar_event(
+            from_date.strftime("%Y-%m-%d"),
+            include_class_range=include_class_range,
+        )
+        if not item:
+            return None
+        return {
+            "title": str(item.get("title") or ""),
+            "start_date": str(item.get("start_date") or ""),
+            "end_date": str(item.get("end_date") or ""),
+            "kind": str(item.get("kind") or "misc"),
+            "is_no_class": bool(item.get("is_no_class")),
+            "source_url": str(item.get("source_url") or ""),
+        }
 
     def parse_calendar_html(self, html_text: str, source_url: str, year: int) -> list[CalendarEvent]:
         text = html_to_text(html_text)
@@ -128,14 +175,14 @@ class CalendarService:
                 "next_class_day": "",
             }
         target_key = target.strftime("%Y-%m-%d")
-        indexed_event_ids = await self.runtime.get_no_class_event_ids_by_date(target_key)
-        if indexed_event_ids:
-            titles = await self.runtime.get_calendar_event_titles_by_ids(indexed_event_ids)
+        hits = await self.runtime.list_calendar_no_class_on_date(target_key)
+        if hits:
+            titles = [str(item.get("title") or "") for item in hits if str(item.get("title") or "").strip()]
             next_class_day = target
             for _ in range(60):
                 next_class_day = next_class_day + timedelta(days=1)
                 next_key = next_class_day.strftime("%Y-%m-%d")
-                if not await self.runtime.get_no_class_event_ids_by_date(next_key):
+                if not await self.runtime.has_calendar_no_class_on_date(next_key):
                     break
             return {
                 "date": target_key,
@@ -143,28 +190,11 @@ class CalendarService:
                 "reason": " / ".join(titles[:3]) if titles else "indexed no-class day",
                 "next_class_day": next_class_day.strftime("%Y-%m-%d"),
             }
-        schedule = await self.get_academic_schedule(scope_key, year=target.year)
-        events = schedule.get("events", [])
-        matched = []
-        for item in events:
-            if not item.get("is_no_class"):
-                continue
-            start = self._parse_date_safe(str(item.get("start_date")))
-            end = self._parse_date_safe(str(item.get("end_date")))
-            if start and end and start <= target <= end:
-                matched.append(str(item.get("title")))
-        is_no_class = bool(matched)
-        next_class_day = target
-        if is_no_class:
-            for _ in range(45):
-                next_class_day = next_class_day + timedelta(days=1)
-                if not self._is_date_in_no_class(next_class_day, events):
-                    break
         return {
             "date": target.strftime("%Y-%m-%d"),
-            "is_no_class_day": is_no_class,
-            "reason": " / ".join(matched[:3]) if matched else "not in no-class events",
-            "next_class_day": next_class_day.strftime("%Y-%m-%d"),
+            "is_no_class_day": False,
+            "reason": "not in no-class events",
+            "next_class_day": target.strftime("%Y-%m-%d"),
         }
 
     def _extract_events(self, text: str, source_url: str, year: int) -> list[CalendarEvent]:
@@ -339,3 +369,12 @@ class CalendarService:
         if years:
             return max(years)
         return fallback_year
+
+    @staticmethod
+    def default_academic_year(now: datetime | None = None) -> int:
+        current = now or datetime.utcnow()
+        return current.year if current.month >= 4 else current.year - 1
+
+    @staticmethod
+    def academic_year_bounds(academic_year: int) -> tuple[date, date]:
+        return date(int(academic_year), 4, 1), date(int(academic_year) + 1, 3, 31)

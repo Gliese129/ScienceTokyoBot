@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from services.calendar import CalendarService
 from services.campus import CampusInfoService
@@ -71,9 +72,11 @@ class QueryOps:
         )
 
     async def academic_schedule(self, scope_key: str, *, year: int | None = None) -> dict[str, Any]:
+        now = datetime.now(timezone.utc)
+        default_ay = now.year if now.month >= 4 else now.year - 1
         return await self.calendar_service.get_academic_schedule(
             scope_key,
-            year=year or datetime.now(timezone.utc).year,
+            year=year or default_ay,
         )
 
     async def calendar_window(
@@ -83,27 +86,22 @@ class QueryOps:
         mode: str,
         year: int | None = None,
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-        payload = await self.academic_schedule(scope_key, year=year)
-        events = [item for item in payload.get("events", []) if isinstance(item, dict)]
-        today = datetime.now(timezone.utc).date()
+        _ = year
+        today = datetime.now(ZoneInfo("Asia/Tokyo")).date()
         if mode == "this-week":
-            end_day = today + timedelta(days=7)
-            picked = []
-            for item in events:
-                try:
-                    start = datetime.strptime(str(item.get("start_date")), "%Y-%m-%d").date()
-                except Exception:
-                    continue
-                if today <= start <= end_day:
-                    picked.append(item)
-            return picked, events
-        future = []
-        for item in events:
-            try:
-                start = datetime.strptime(str(item.get("start_date")), "%Y-%m-%d").date()
-            except Exception:
-                continue
-            if start >= today:
-                future.append(item)
-        future.sort(key=lambda x: str(x.get("start_date")))
-        return (future[:1] if future else []), events
+            week_start = today - timedelta(days=today.weekday())
+            week_end = week_start + timedelta(days=6)
+            events = await self.calendar_service.list_events_overlap(
+                scope_key,
+                start_date=week_start,
+                end_date=week_end,
+            )
+            return events, events
+        next_event = await self.calendar_service.find_next_event(
+            scope_key,
+            from_date=today,
+            include_class_range=False,
+        )
+        if not next_event:
+            return [], []
+        return [next_event], [next_event]

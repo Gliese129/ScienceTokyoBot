@@ -1,3 +1,17 @@
+## 0.9.1 - Calendar Output Fix + Main Split
+
+- Fixed `isct_calendar_get_academic_schedule` output to include `term_ranges` (1Q-4Q) in answer rendering.
+- Fixed calendar source rendering:
+  - de-duplicated source URLs (canonicalized, stable order)
+  - removed hardcoded `/schedules/2025` in `isct_calendar_is_no_class_day`
+- Updated academic-year default for calendar queries to April-based AY rollover.
+- Split monolithic `main.py` into mixins:
+  - `plugin/mixins/{common,admin,exam,calendar,news,syllabus,misc}.py`
+  - root `main.py` now keeps registration + initialization and composes mixins.
+- Added strategy documentation:
+  - `docs/caching_and_sync.md`
+- Updated zip build inputs to include `plugin/`, `docs/`, and `CHANGELOG.md`.
+
 ## 0.9.0 - Cache & Sync Strategy Refactor
 
 - Added plugin config `parser_provider_id` with `_special: select_provider` for dedicated parser model selection in AstrBot WebUI.
