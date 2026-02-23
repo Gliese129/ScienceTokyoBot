@@ -1,0 +1,10 @@
+[project]
+name = "science-tokyo-plugin"
+version = "0.5.0"
+description = "AstrBot ScienceTokyo Plugin"
+requires-python = ">=3.10"
+dependencies = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

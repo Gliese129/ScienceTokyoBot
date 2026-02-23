@@ -1,0 +1,102 @@
+{
+  "enabled_features": {
+    "type": "string",
+    "description": "Comma-separated feature ids. Leave empty to use defaults.",
+    "default": "feature.course,feature.course_compare,feature.exam,feature.exam_watch,feature.calendar,feature.news_search,feature.scholarship,feature.abroad,feature.clubs,feature.prefs"
+  },
+  "allowed_domains": {
+    "type": "string",
+    "description": "Comma-separated allowed source domains.",
+    "default": "isct.ac.jp,students.isct.ac.jp,syllabus.s.isct.ac.jp,titech.ac.jp,tmd.ac.jp,titech.info,welcome.titech.app"
+  },
+  "exam_seeds": {
+    "type": "string",
+    "description": "Comma-separated exam seed pages (list pages containing exam PDFs).",
+    "default": "https://www.titech.ac.jp/english/student/students/life/undergraduate-exam"
+  },
+  "course_seeds": {
+    "type": "string",
+    "description": "Comma-separated course/syllabus seed pages.",
+    "default": "https://syllabus.s.isct.ac.jp/search"
+  },
+  "calendar_seeds": {
+    "type": "string",
+    "description": "Comma-separated calendar seed pages.",
+    "default": "https://www.titech.ac.jp/english/student/students/life/schedules"
+  },
+  "news_seeds": {
+    "type": "string",
+    "description": "Comma-separated news seed pages.",
+    "default": "https://students.isct.ac.jp/en,https://students.isct.ac.jp/ja"
+  },
+  "scholarship_seeds": {
+    "type": "string",
+    "description": "Comma-separated scholarship seed pages.",
+    "default": "https://students.isct.ac.jp/en,https://students.isct.ac.jp/ja,https://students.isct.ac.jp/en/012/tuition-and-scholarship/specific-scholarships,https://students.isct.ac.jp/en/012/tuition-and-scholarship/scholarships,https://students.isct.ac.jp/ja/012/tuition-and-scholarship/specific-scholarships"
+  },
+  "abroad_seeds": {
+    "type": "string",
+    "description": "Comma-separated abroad seed pages.",
+    "default": "https://students.isct.ac.jp/en/016/global/abroad"
+  },
+  "clubs_seeds": {
+    "type": "string",
+    "description": "Comma-separated clubs seed pages.",
+    "default": "https://students.isct.ac.jp/en/012/student-life-and-support/extracurricular-activities/university-festivals"
+  },
+  "news_legacy_seeds": {
+    "type": "string",
+    "description": "Comma-separated legacy news pivot pages.",
+    "default": "https://www.isct.ac.jp/en/news/it87dcs7t5y2"
+  },
+  "per_user_limit_10min": {
+    "type": "int",
+    "description": "Per-user request limit in 10 minutes.",
+    "default": 10
+  },
+  "per_user_limit_day": {
+    "type": "int",
+    "description": "Per-user request limit in 24 hours.",
+    "default": 60
+  },
+  "per_scope_limit_10min": {
+    "type": "int",
+    "description": "Per-scope total request limit in 10 minutes.",
+    "default": 100
+  },
+  "warning_increment": {
+    "type": "float",
+    "description": "Score increment for non-severe moderation violation.",
+    "default": 0.25
+  },
+  "decay_half_life_days": {
+    "type": "float",
+    "description": "Moderation score half-life in days.",
+    "default": 7
+  },
+  "ban_level_1_minutes": {
+    "type": "int",
+    "description": "Ban duration for level-1 severe violation.",
+    "default": 10
+  },
+  "ban_level_2_hours": {
+    "type": "int",
+    "description": "Ban duration for level-2 severe violation.",
+    "default": 24
+  },
+  "ban_level_3_permanent": {
+    "type": "bool",
+    "description": "Whether level-3 severe violation is permanent ban.",
+    "default": true
+  },
+  "admin_user_keys": {
+    "type": "string",
+    "description": "Comma-separated user keys (e.g. discord:user:12345) treated as admin.",
+    "default": ""
+  },
+  "admin_role_ids": {
+    "type": "string",
+    "description": "Comma-separated role ids treated as admin.",
+    "default": ""
+  }
+}

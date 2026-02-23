@@ -1,0 +1,6 @@
+name: astrbot_plugin_isct_bot
+display_name: ScienceTokyo Plugin
+desc: Science Tokyo campus nerd bot plugin for Discord/DM scope-aware workflows.
+version: v0.7.0
+author: Gliese
+repo: https://github.com/Gliese129/ScienceTokyoBot

@@ -1,0 +1,38 @@
+{
+  "toolDefaults": {
+    "defaultLimit": 8,
+    "maxListLimit": 20,
+    "sourceDebugEnabled": true
+  },
+  "fallbackSources": {
+    "exam": [
+      "https://www.titech.ac.jp/english/student/students/life/undergraduate-exam"
+    ],
+    "course": [
+      "https://syllabus.s.isct.ac.jp/search"
+    ],
+    "calendar": [
+      "https://www.titech.ac.jp/english/student/students/life/schedules"
+    ],
+    "news": [
+      "https://students.isct.ac.jp/en",
+      "https://students.isct.ac.jp/ja"
+    ],
+    "scholarship": [
+      "https://students.isct.ac.jp/en",
+      "https://students.isct.ac.jp/ja",
+      "https://students.isct.ac.jp/en/012/tuition-and-scholarship/specific-scholarships",
+      "https://students.isct.ac.jp/en/012/tuition-and-scholarship/scholarships",
+      "https://students.isct.ac.jp/ja/012/tuition-and-scholarship/specific-scholarships"
+    ],
+    "abroad": [
+      "https://students.isct.ac.jp/en/016/global/abroad"
+    ],
+    "clubs": [
+      "https://students.isct.ac.jp/en/012/student-life-and-support/extracurricular-activities/university-festivals"
+    ],
+    "news_legacy": [
+      "https://www.isct.ac.jp/en/news/it87dcs7t5y2"
+    ]
+  }
+}
